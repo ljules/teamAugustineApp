@@ -2,44 +2,61 @@ package com.example.teamaugustineapp.data.gps
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.location.Location
 import android.os.Looper
 import com.google.android.gms.location.*
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 
+/**
+ * Structure de données regroupant les informations nécessaires du GPS.
+ */
+data class GpsData(
+    val speed: Float,
+    val latitude: Double,
+    val longitude: Double
+)
 
 class GpsService(context: Context) {
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
 
-    @SuppressLint("MissingPermission") // La vérification sera faite dans l'UI/Activity
-    fun getSpeedUpdates(): Flow<Float> = callbackFlow {
+    @SuppressLint("MissingPermission")
+    fun getGpsUpdates(): Flow<GpsData> = callbackFlow {
 
-        // Configuration de la requête GPS :
+        // Configuration optimisée pour la course (Haute précision)
         val locationRequest = LocationRequest.Builder(
-            Priority.PRIORITY_HIGH_ACCURACY, 1000 // Update toutes les 1000ms (1s)
-        ).build()
+            Priority.PRIORITY_HIGH_ACCURACY, 1000 // Update toutes les secondes
+        ).apply {
+            setMinUpdateIntervalMillis(500)    // Autorise des mises à jour jusqu'à 0.5s si dispo
+            setMinUpdateDistanceMeters(0f)     // Ne pas ignorer les petits déplacements
+        }.build()
 
-        // Le callback qui reçoit les données du capteur
         val locationCallback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
                 for (location in locationResult.locations) {
-                    // speed est en m/s par défaut, conversion en km/h
-                    val speedKmH = location.speed * 3.6f
-                    trySend(speedKmH)
+                    // Conversion m/s vers km/h
+                    val speedKmH = if (location.hasSpeed()) location.speed * 3.6f else 0.0f
+
+                    // Envoi des données groupées
+                    trySend(
+                        GpsData(
+                            speed = speedKmH,
+                            latitude = location.latitude,
+                            longitude = location.longitude
+                        )
+                    )
                 }
             }
         }
 
-        // Lancement de l'écoute
+        // Démarrage de l'écoute
         fusedLocationClient.requestLocationUpdates(
             locationRequest,
             locationCallback,
             Looper.getMainLooper()
         )
 
-        // Fermeture du flux si on n'en a plus besoin (nettoyage mémoire)
+        // Fermeture propre du flux (nettoyage lors de l'arrêt du ViewModel)
         awaitClose {
             fusedLocationClient.removeLocationUpdates(locationCallback)
         }
